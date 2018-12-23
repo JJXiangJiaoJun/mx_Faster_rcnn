@@ -52,8 +52,8 @@ class RPN(nn.Block):
         weight_initializer = mx.init.Normal(sigma=0.01)
         # 锚框生成器
         with self.name_scope():
-            self._anchor_generator = RPNAnchorGenerator(stride, base_size, ratios, scales, alloc_size)
-            anchor_depth = self._anchor_generator.num_depth
+            self.anchor_generator = RPNAnchorGenerator(stride, base_size, ratios, scales, alloc_size)
+            anchor_depth = self.anchor_generator.num_depth
             self._rpn_proposal = RPNProposal(clip, nms_thresh, train_pre_nms,
                                              train_post_nms, test_pre_nms, test_post_nms, min_size,
                                              stds=(1., 1., 1., 1.))
@@ -113,7 +113,7 @@ class RPN(nn.Block):
              输出的region proposal坐标 Corner
     
          """
-        anchors = self._anchor_generator(x)
+        anchors = self.anchor_generator(x)
         # 提取特征
         feat = self.conv1(x)
         # 预测

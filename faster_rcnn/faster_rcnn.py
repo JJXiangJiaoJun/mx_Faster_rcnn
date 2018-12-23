@@ -7,6 +7,7 @@ from ..rcnn.rcnn import RCNN
 from ..rpn.rpn import RPN
 from .rcnn_target import RCNNTargetSampler, RCNNTargetGenerator
 from ..model.resnet50 import get_resnet50v1b
+from gluoncv.model_zoo import resnet50_v1b as gcv_resnet50_v1b
 
 
 class FasterRCNN(RCNN):
@@ -48,9 +49,13 @@ class FasterRCNN(RCNN):
 
             # 用来给训练时Region Proposal采样，正负样本比例为0.25
             self.sampler = RCNNTargetSampler(
-                num_images=self._max_batch, num_inputs=rpn_train_post_nms,
-                num_samples=self._num_sample, pos_thresh=pos_iou_thresh,
-                pos_ratio=pos_ratio, max_gt_box=max_num_gt)
+                num_image=self._max_batch, num_proposal=rpn_train_post_nms,
+                num_sample=num_sample, pos_iou_thresh=pos_iou_thresh,
+                pos_ratio=pos_ratio, max_num_gt=max_num_gt)
+            # self.sampler = RCNNTargetSampler(
+            #     num_images=self._max_batch, num_inputs=rpn_train_post_nms,
+            #     num_samples=num_sample, pos_thresh=pos_iou_thresh,
+            #     pos_ratio=pos_ratio, max_gt_box=max_num_gt)
 
     @property
     def target_generator(self):
@@ -75,7 +80,8 @@ class FasterRCNN(RCNN):
         # 输入RPN网络
         if autograd.is_training():
             # 训练过程
-            rpn_score, rpn_box, raw_rpn_score, raw_rpn_box, anchors = self.rpn(feat, nd.zeros_like(x))
+            img = nd.zeros_like(x)
+            rpn_score, rpn_box, raw_rpn_score, raw_rpn_box, anchors = self.rpn(feat,img)
             # 采样输出
             rpn_box, samples, matches = self.sampler(rpn_box, rpn_score, gt_boxes)
         else:
@@ -90,7 +96,7 @@ class FasterRCNN(RCNN):
 
         # 将rois变为2D，加上batch_index
         with autograd.pause():
-            roi_batchid = nd.arange(0, self._max_batch, repeat=num_roi)
+            roi_batchid = nd.arange(0, self._max_batch, repeat=num_roi,ctx=rpn_box.context)
 
             rpn_roi = nd.concat(*[roi_batchid.reshape((-1, 1)), rpn_box.reshape((-1, 4))], dim=-1)
             rpn_roi = nd.stop_gradient(rpn_roi)
@@ -190,6 +196,42 @@ def get_faster_rcnn_resnet50v1b(pretraied=False, pretrained_base=True, **kwargs)
                            nms_thresh=0.3, nms_topk=400, post_nms=100,
                            roi_mode='align', roi_size=(14, 14), stride=16, clip=None,
                            rpn_channel=1024, base_size=16, scales=(8, 16, 32),
+                           ratios=(0.5, 1, 2), alloc_size=(128, 128), rpn_nms_thresh=0.7,
+                           rpn_train_pre_nms=12000, rpn_train_post_nms=2000,
+                           rpn_test_pre_nms=6000, rpn_test_post_nms=300, rpn_min_size=16,
+                           num_sample=128, pos_iou_thresh=0.5, pos_ratio=0.25, max_num_gt=100,
+                           **kwargs)
+
+
+def faster_rcnn_resnet50_v1b_voc(pretrained=False, pretrained_base=True, **kwargs):
+    r"""
+    
+    :param pretained:   bool or str
+    :param pretrained_base: bool or str
+
+    :return: model of faster-rcnn
+    """
+    from ..model.resnetv1b import resnet50_v1b
+    # from ..data import VOCDetection
+    classes = CLASSES = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car',
+                         'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse', 'motorbike',
+                         'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor')
+    pretrained_base = False if pretrained else pretrained_base
+    base_network = gcv_resnet50_v1b(pretrained=pretrained_base, dilated=False,
+                                    use_global_stats=True, **kwargs)
+    features = nn.HybridSequential()
+    top_features = nn.HybridSequential()
+    for layer in ['conv1', 'bn1', 'relu', 'maxpool', 'layer1', 'layer2', 'layer3']:
+        features.add(getattr(base_network, layer))
+    for layer in ['layer4']:
+        top_features.add(getattr(base_network, layer))
+    train_patterns = '|'.join(['.*dense', '.*rpn', '.*down(2|3|4)_conv', '.*layers(2|3|4)_conv'])
+
+    return get_faster_rcnn(pretrained=pretrained, features=features, top_features=top_features, classes=classes,
+                           short=600, max_size=1000, train_patterns=train_patterns,
+                           nms_thresh=0.3, nms_topk=400, post_nms=100,
+                           roi_mode='align', roi_size=(14, 14), stride=16, clip=None,
+                           rpn_channel=1024, base_size=16, scales=(2, 4, 8, 16, 32),
                            ratios=(0.5, 1, 2), alloc_size=(128, 128), rpn_nms_thresh=0.7,
                            rpn_train_pre_nms=12000, rpn_train_post_nms=2000,
                            rpn_test_pre_nms=6000, rpn_test_post_nms=300, rpn_min_size=16,

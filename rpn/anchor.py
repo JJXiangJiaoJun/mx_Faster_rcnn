@@ -3,7 +3,7 @@
 import numpy as np
 from mxnet import gluon
 from mxnet import nd
-
+import mxnet as mx
 
 class RPNAnchorGenerator(gluon.Block):
     """
@@ -27,17 +27,14 @@ class RPNAnchorGenerator(gluon.Block):
     def __init__(self, stride, base_size, ratios, scales, alloc_size, **kwargs):
         super(RPNAnchorGenerator, self).__init__(**kwargs)
         if not base_size:
-            raise ValueError("Invalid base_size: {}".format(base_size))
-        # 防止非法输入
+            raise ValueError("Invalid base_size: {}.".format(base_size))
         if not isinstance(ratios, (tuple, list)):
             ratios = [ratios]
         if not isinstance(scales, (tuple, list)):
             scales = [scales]
 
-        # 每个像素的锚框数
-        self._num_depth = len(ratios) * len(scales)
-        # 预生成锚框
         anchors = self._generate_anchors(stride, base_size, ratios, scales, alloc_size)
+        self._num_depth = len(ratios) * len(scales)
         self.anchors = self.params.get_constant('anchor_', anchors)
 
     @property
@@ -73,8 +70,17 @@ class RPNAnchorGenerator(gluon.Block):
         return anchors
 
     # 对原始生成的锚框进行切片操作
-    def forward(self, x):
-        # 切片索引
+    # pylint: disable=arguments-differ
+    def forward(self,x):
+        """Slice anchors given the input image shape.
+
+        Inputs:
+            - **x**: input tensor with (1 x C x H x W) shape.
+        Outputs:
+            - **out**: output anchor with (1, N, 4) shape. N is the number of anchors.
+
+        """
         anchors = self.anchors.value
+        anchors = anchors.as_in_context(x.context)
         a = nd.slice_like(anchors, x * 0, axes=(2, 3))
         return a.reshape((1, -1, 4))
